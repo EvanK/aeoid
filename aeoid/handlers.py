@@ -22,10 +22,21 @@ from google.appengine.ext import webapp
 from google.appengine.ext.webapp import template
 from openid.consumer.consumer import Consumer
 from openid.extensions import sreg
+from openid.extensions import ax
 
 from aeoid import store
 from aeoid import users
 
+# list of attributes to request via Simple Registration
+OPENID_SREG_ATTRS = ['nickname', 'email']
+
+# dict of uris => attributes to request via Attribute Exchange
+OPENID_AX_ATTRS = {
+    'http://axschema.org/contact/email':        'email',
+    'http://axschema.org/namePerson/friendly':  'nickname',
+    'http://axschema.org/namePerson/first':     'firstname',
+    'http://axschema.org/namePerson/last':      'lastname',
+}
 
 class BaseHandler(webapp.RequestHandler):
   def initialize(self, request, response):
@@ -53,12 +64,25 @@ class BeginLoginHandler(BaseHandler):
       return
 
     consumer = self.get_consumer()
-    request = consumer.begin(openid_url)
+    # if consumer discovery or authentication fails, show error page
+    try:
+      request = consumer.begin(openid_url)
+    except Exception, e:
+      logging.error("Unexpected error in OpenID discovery/authentication: %s", e)
+      self.render_template('error.html')
+      return
     
     # TODO: Support custom specification of extensions
     # TODO: Don't ask for data we already have, perhaps?
-    request.addExtension(sreg.SRegRequest(required=['nickname', 'email']))    
-
+    # use Simple Registration if available
+    request.addExtension(sreg.SRegRequest(required=OPENID_SREG_ATTRS))
+    # or Atribute Exchange if available
+    ax_request = ax.FetchRequest()
+    for attruri in OPENID_AX_ATTRS:
+        ax_request.add(ax.AttrInfo(attruri, required=True, alias=OPENID_AX_ATTRS[attruri]))
+    request.addExtension(ax_request)
+    # TODO: determine during discovery whether SREG and/or AX are available, and don't add them if they're not?
+    # assemble and send redirect
     continue_url = self.request.get('continue', '/')
     return_to = "%s%s?continue=%s" % (self.request.host_url,
                                       users.OPENID_FINISH_PATH, continue_url)
@@ -71,11 +95,34 @@ class BeginLoginHandler(BaseHandler):
 
 class FinishLoginHandler(BaseHandler):
   def finish_login(self, response):
-    sreg_data = sreg.SRegResponse.fromSuccessResponse(response) or {}
+    # get sreg data if available
+    id_res_data = sreg.SRegResponse.fromSuccessResponse(response)
+    if not id_res_data is None:
+      id_res_data = dict(id_res_data)
+    
+    # otherwise get ax data if available
+    if id_res_data is None:
+      id_res_data = {}
+      try:
+        ax_data = ax.FetchResponse.fromSuccessResponse(response)
+        for attruri in OPENID_AX_ATTRS:
+          try:
+            attrvalue = ax_data.get(attruri)
+            id_res_data[ OPENID_AX_ATTRS[attruri] ] = attrvalue.pop(0)
+          except (AttributeError,IndexError,KeyError):
+            pass
+        # try to ensure we have a nickname (even if we fall back to email)
+        if not id_res_data.has_key('nickname'):
+          if id_res_data.has_key('firstname') or id_res_data.has_key('lastname'):
+            id_res_data['nickname'] = id_res_data.get('firstname', '') + ' ' + id_res_data.get('lastname', '')
+          elif id_res_data.has_key('email'):
+            id_res_data['nickname'] = id_res_data['email']
+      except ax.AXError:
+        pass
     user_info = users.UserInfo.update_or_insert(
         response.endpoint.claimed_id,
         server_url=response.endpoint.server_url,
-        **dict(sreg_data))
+        **id_res_data)
     self.session['aeoid.user'] = str(user_info.key())
     self.session.save()
     users._current_user = users.User(None, _from_model_key=user_info.key(),
