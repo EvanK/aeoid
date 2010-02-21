@@ -2,7 +2,7 @@
 {% block title %}Log In{% endblock %}
 {% block head%}
   {{ block.super }}
-  <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.3.1/jquery.min.js"></script>
+  <script type="text/javascript" src="http{{is_secure}}://ajax.googleapis.com/ajax/libs/jquery/1.3.1/jquery.min.js"></script>
   <script type="text/javascript" src="static/jquery.openid.js"></script>
   <script type="text/javascript">  $(function() { $("form.openid").openid(); });</script>
 {% endblock %}

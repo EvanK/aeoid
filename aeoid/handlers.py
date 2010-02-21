@@ -43,9 +43,10 @@ class BaseHandler(webapp.RequestHandler):
     super(BaseHandler, self).initialize(request, response)
     self.session = self.request.environ.get('aeoid.beaker.session')
 
-  def render_template(self, filename, template_args=None):
-    if not template_args:
-      template_args = {}
+  def render_template(self, filename, template_args={}):
+    # set some baseline template args
+    template_args['is_secure'] = 's' if os.environ.get('HTTPS','').lower() == 'on' else ''
+    # render template
     path = os.path.join(os.path.dirname(__file__), 'templates', filename)
     self.response.out.write(template.render(path, template_args))
 
