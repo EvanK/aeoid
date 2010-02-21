@@ -45,7 +45,7 @@ class BaseHandler(webapp.RequestHandler):
 
   def render_template(self, filename, template_args={}):
     # set some baseline template args
-    template_args['is_secure'] = 's' if os.environ.get('HTTPS','').lower() == 'on' else ''
+    template_args['is_secure'] = 's' if self.request.environ.get('HTTPS','').lower() == 'on' else ''
     # render template
     path = os.path.join(os.path.dirname(__file__), 'templates', filename)
     self.response.out.write(template.render(path, template_args))
